@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Interactive Assistant</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; font-family: Arial, sans-serif; background-color: #f4f4f4; }
+    body { display: flex; flex-direction: column; }
+    .header {
+      height: 10vh; background: #fff; display: flex;
+      align-items: center; justify-content: center; font-size: 2em;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 2;
+    }
+    .avatar-container { flex: 1; position: relative; overflow: hidden; background: #e0e0e0; }
+    .footer {
+      height: 12vh; background: #fff; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      box-shadow: 0 -2px 5px rgba(0,0,0,0.1); z-index: 2;
+    }
+    #recordBtn {
+      padding: 12px 24px; font-size: 1em; background-color: #007bff;
+      color: white; border: none; border-radius: 8px; cursor: pointer;
+    }
+    #recordBtn:hover { background-color: #0056b3; }
+    #output { margin-top: 10px; color: #333; text-align: center; padding: 0 10px; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <div class="header">Interactive Assistant</div>
+  <div class="avatar-container"></div>
+  <div class="footer">
+    <button id="recordBtn">Click to Speak</button>
+    <div id="output"></div>
+  </div>
+
+  <!-- Avatar + Voice Logic -->
+  <script type="module">
+import * as THREE from 'https://esm.sh/three';
+import { GLTFLoader } from 'https://esm.sh/three/examples/jsm/loaders/GLTFLoader.js';
+
+const container = document.querySelector('.avatar-container');
+const outputDiv = document.getElementById('output');
+const recordBtn = document.getElementById('recordBtn');
+
+// Scene setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(25, container.clientWidth / container.clientHeight, 0.1, 1000);
+camera.position.set(0, 1.5, 4);
+
+const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+scene.add(light);
+
+// Model variables
+let model, leftEye, rightEye, mouth, leftHand, rightHand;
+let animationIntervals = [];
+
+const loader = new GLTFLoader();
+loader.load('./assets/avatar_girl.glb', (gltf) => {
+    model = gltf.scene;
+    model.scale.set(2, 2, 1.5);
+    model.position.y = -1.5;
+
+    // Find all body parts
+    model.traverse((child) => {
+        if (child.isMesh) {
+            if (child.name.toLowerCase().includes("left") && child.name.toLowerCase().includes("eye")) leftEye = child;
+            if (child.name.toLowerCase().includes("right") && child.name.toLowerCase().includes("eye")) rightEye = child;
+            if (child.name.toLowerCase().includes("mouth")) mouth = child;
+            if (child.name.toLowerCase().includes("left") && child.name.toLowerCase().includes("hand")) leftHand = child;
+            if (child.name.toLowerCase().includes("right") && child.name.toLowerCase().includes("hand")) rightHand = child;
+        }
+    });
+
+    scene.add(model);
+    animate();
+    startEyeBlinking(); // Start independent blinking
+});
+
+
+//###################################################################
+
+loader.load('./assets/avatar.glb', (gltf) => {
+    model = gltf.scene;
+    // ... (keep existing code) ...
+
+    // 👇 ADD THIS DEBUG CODE 👇
+    console.log("=== Checking Model Parts ===");
+    model.traverse((child) => {
+        if (child.isMesh) {
+            console.log("Found:", child.name);
+            if (child.name.toLowerCase().includes("mouth")) {
+                console.log("✅ MOUTH FOUND!");
+                mouth = child;
+            }
+        }
+    });
+});
+
+//###################################################################
+
+function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+}
+
+// Cleanup all animations
+function clearAllIntervals() {
+    animationIntervals.forEach(interval => clearInterval(interval));
+    animationIntervals = [];
+}
+
+// PROPER EYE BLINKING (both eyes)
+function startEyeBlinking() {
+    const blink = () => {
+        if (leftEye) leftEye.scale.y = 0.1;
+        if (rightEye) rightEye.scale.y = 0.1;
+        setTimeout(() => {
+            if (leftEye) leftEye.scale.y = 1;
+            if (rightEye) rightEye.scale.y = 1;
+        }, 150);
+    };
+    animationIntervals.push(setInterval(blink, 4000));
+    blink(); // Initial blink
+}
+
+// IMPROVED MOUTH MOVEMENT
+function startMouthMovement() {
+    mouthInterval = setInterval(() => {
+        // Slightly scale the head up/down
+        model.scale.y = (model.scale.y === 1.5) ? 1.55 : 1.5;
+    }, 200);
+}
+
+// HAND MOVEMENT (unchanged)
+function startHandMovement() {
+    let angle = 0;
+    const handAnim = setInterval(() => {
+        angle += 0.05;
+        const offset = Math.sin(angle) * 0.1;
+        if (leftHand) leftHand.rotation.z = offset;
+        if (rightHand) rightHand.rotation.z = -offset;
+    }, 60);
+    animationIntervals.push(handAnim);
+}
+
+function stopAllMovement() {
+    clearAllIntervals();
+    // Reset all parts to default
+    if (mouth) mouth.scale.y = 1;
+    if (leftHand) leftHand.rotation.z = 0;
+    if (rightHand) rightHand.rotation.z = 0;
+}
+
+// SPEECH FUNCTIONS
+function speak(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.pitch = 1;
+    utterance.rate = 1;
+
+    utterance.onstart = () => startMouthMovement();
+    utterance.onend = () => stopAllMovement();
+
+    speechSynthesis.speak(utterance);
+}
+
+// Speech Recognition (unchanged)
+const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+recognition.lang = 'en-US';
+recognition.interimResults = false;
+
+recordBtn.addEventListener('click', () => {
+    recognition.start();
+    recordBtn.innerText = 'Listening...';
+});
+
+recognition.onresult = async (event) => {
+    const transcript = event.results[0][0].transcript;
+    outputDiv.innerText = `You said: ${transcript}`;
+    const response = await fetch('http://127.0.0.1:5000/get-gemini-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: transcript })
+    });
+    const data = await response.json();
+    speak(data.response || "Sorry, I couldn't understand.");
+};
+
+recognition.onerror = (event) => {
+    outputDiv.innerText = 'Error: ' + event.error;
+    recordBtn.innerText = 'Click to Speak';
+};
+
+recognition.onend = () => {
+    recordBtn.innerText = 'Click to Speak';
+};
+</script>
+</body>
+</html>
